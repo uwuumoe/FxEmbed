@@ -49,6 +49,11 @@ jobs:
           [build]
           command = "npm run build"
           [[containers]]
+          class_name = "MediaTranscoder"
+          image = "./services/media-transcoder/Dockerfile"
+          instance_type = "standard-2"
+          max_instances = 4
+          [[containers]]
           class_name = "MediaTranscoderV2"
           image = "./services/media-transcoder/Dockerfile"
           instance_type = "standard-2"
@@ -56,6 +61,9 @@ jobs:
           [[durable_objects.bindings]]
           class_name = "MediaTranscoderV2"
           name = "MEDIA_TRANSCODER_V2"
+          [[migrations]]
+          new_sqlite_classes = ["MediaTranscoder"]
+          tag = "media-transcoder-v1"
           [[migrations]]
           new_sqlite_classes = ["MediaTranscoderV2"]
           tag = "media-transcoder-v2"
