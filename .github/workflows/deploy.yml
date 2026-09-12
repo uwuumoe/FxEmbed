@@ -1,6 +1,7 @@
 name: Deploy to Cloudflare Workers
 
 on:
+  workflow_dispatch:
   workflow_run:
     workflows: ['Tests']
     types: [completed]
@@ -13,16 +14,17 @@ jobs:
   deploy:
     # workflow_run runs with write-capable secrets; accept only our own successful main run.
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     environment: Production
     name: Deploy
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
