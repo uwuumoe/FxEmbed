@@ -325,6 +325,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       if (req.headers.range) headers.range = req.headers.range;
       const upstream = await safeFetch(source, isAllowedSource, { headers });
       const body = await readResponse(upstream);
+      let status = upstream.status;
       const responseHeaders: Record<string, string> = mediaHeaders(
         upstream.headers.get('content-type') || 'video/mp4',
         body.length
@@ -333,7 +334,24 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         const value = upstream.headers.get(header);
         if (value) responseHeaders[header] = value;
       }
-      res.writeHead(upstream.status, responseHeaders);
+      if (req.headers.range && upstream.status === 200) {
+        const match = req.headers.range.match(/^bytes=(\d+)-(\d*)$/);
+        if (match) {
+          const start = Number(match[1]);
+          const end = match[2] ? Number(match[2]) : body.length - 1;
+          if (start <= end && start < body.length) {
+            const boundedEnd = Math.min(end, body.length - 1);
+            const ranged = body.subarray(start, boundedEnd + 1);
+            responseHeaders['content-range'] = `bytes ${start}-${boundedEnd}/${body.length}`;
+            responseHeaders['accept-ranges'] = 'bytes';
+            responseHeaders['content-length'] = String(ranged.length);
+            status = 206;
+            res.writeHead(status, responseHeaders);
+            return req.method === 'HEAD' ? res.end() : res.end(ranged);
+          }
+        }
+      }
+      res.writeHead(status, responseHeaders);
       return req.method === 'HEAD' ? res.end() : res.end(body);
     }
     if (url.pathname === '/pds-cache') {
