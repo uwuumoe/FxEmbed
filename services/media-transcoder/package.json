@@ -1,0 +1,7 @@
+{
+  "name": "@fxembed/media-transcoder",
+  "private": true,
+  "type": "module",
+  "scripts": {"start": "tsx src/server.ts", "test": "vitest run"},
+  "dependencies": {"tsx": "^4.23.13", "typescript": "^6.0.3", "vitest": "^4.1.11"}
+}
