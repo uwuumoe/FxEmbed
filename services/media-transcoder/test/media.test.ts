@@ -1,5 +1,29 @@
 import { describe, expect, test } from 'vitest';
+import { spawn } from 'node:child_process';
+import { runMosaic } from '../src/server.js';
 import { buildSourceUrl, isAllowedSource, outputFormat, mosaicSourceUrls } from '../src/policy.js';
+
+const image = (color: string): Promise<Buffer> =>
+  new Promise((resolve, reject) => {
+    const child = spawn('ffmpeg', [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'lavfi',
+      '-i',
+      `color=c=${color}:s=8x8`,
+      '-frames:v',
+      '1',
+      '-f',
+      'mjpeg',
+      'pipe:1'
+    ]);
+    const chunks: Buffer[] = [];
+    child.stdout.on('data', chunk => chunks.push(chunk));
+    child.on('error', reject);
+    child.on('close', code => code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(`ffmpeg exited ${code}`)));
+  });
 
 describe('media replacement policy', () => {
   test('maps tweet_video animation paths to the fixed Twitter CDN', () => {
@@ -30,5 +54,17 @@ describe('media replacement policy', () => {
     expect(() =>
       mosaicSourceUrls(Array.from({ length: 5 }, (_, i) => `https://cdn.bsky.app/${i}`))
     ).toThrow();
+  });
+
+  test('renders a single-image Bluesky mosaic', async () => {
+    const output = await runMosaic([await image('red')], 'jpeg');
+    expect(output.subarray(0, 2).toString('hex')).toBe('ffd8');
+    expect(output.length).toBeGreaterThan(100);
+  });
+
+  test('renders every input in a multi-image Bluesky mosaic', async () => {
+    const output = await runMosaic([await image('red'), await image('blue')], 'jpeg');
+    expect(output.subarray(0, 2).toString('hex')).toBe('ffd8');
+    expect(output.length).toBeGreaterThan(500);
   });
 });

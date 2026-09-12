@@ -159,24 +159,36 @@ async function runMosaic(inputs: Buffer[], format: 'jpeg' | 'webp'): Promise<Buf
       for (const file of files) args.push('-i', file);
       const cols = Math.min(2, inputs.length);
 
-      const refs = inputs
-        .map(
-          (_, i) =>
-            `[${i}:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2[${i}v]`
-        )
-        .join(';');
-      const layout = inputs
-        .map((_, i) => `${(i % cols) * 640}_${Math.floor(i / cols) * 360}`)
-        .join('|');
-      args.push(
-        '-filter_complex',
-        `${refs};${inputs.map((_, i) => `[${i}v]`).join('')}xstack=inputs=${inputs.length}:layout=${layout}:fill=black`,
-        '-frames:v',
-        '1',
-        '-f',
-        format === 'jpeg' ? 'mjpeg' : 'webp',
-        'pipe:1'
-      );
+      if (inputs.length === 1) {
+        args.push(
+          '-vf',
+          'scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2',
+          '-frames:v',
+          '1',
+          '-f',
+          format === 'jpeg' ? 'mjpeg' : 'webp',
+          'pipe:1'
+        );
+      } else {
+        const refs = inputs
+          .map(
+            (_, i) =>
+              `[${i}:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2[${i}v]`
+          )
+          .join(';');
+        const layout = inputs
+          .map((_, i) => `${(i % cols) * 640}_${Math.floor(i / cols) * 360}`)
+          .join('|');
+        args.push(
+          '-filter_complex',
+          `${refs};${inputs.map((_, i) => `[${i}v]`).join('')}xstack=inputs=${inputs.length}:layout=${layout}:fill=black`,
+          '-frames:v',
+          '1',
+          '-f',
+          format === 'jpeg' ? 'mjpeg' : 'webp',
+          'pipe:1'
+        );
+      }
       const child = spawn('ffmpeg', args);
       const chunks: Buffer[] = [];
       let size = 0;
@@ -391,4 +403,4 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
 }
 const server = createServer(handle);
 if (process.env.NODE_ENV !== 'test') server.listen(Number(process.env.PORT || 8787), '0.0.0.0');
-export { server, transcode };
+export { server, transcode, runMosaic };

@@ -426,7 +426,7 @@ export const buildAPIBlueskyPost = async (
     language !== record?.langs?.[0]
   ) {
     let didTranslate = false;
-    if (getBlueskyProviderEnv().polyglotDomainList.length > 0 && host.translatePolyglot) {
+    if (host.translatePolyglot) {
       const translatePolyglot = await host.translatePolyglot(apiStatus, language);
       if (translatePolyglot !== null) {
         apiStatus.translation = {
