@@ -97,7 +97,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: deploy --no-bundle
+          command: deploy --no-bundle --containers-rollout=none
       - name: Preserve credential binding
         env:
           CREDENTIAL_KEY: ${{ secrets.CREDENTIAL_KEY }}
