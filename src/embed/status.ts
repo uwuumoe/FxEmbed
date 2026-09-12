@@ -117,8 +117,10 @@ export const handleStatus = async (
 
   let thread: SocialThread;
   let useLanguage = language;
-  // Only request translation for activity embed, otherwise we'll be doing it twice
-  if (!flags.noActivity && isDiscord) {
+  // Keep translated Discord embeds in the initial HTML: og:description is read
+  // before Discord fetches the deferred activity payload. Untranslated requests
+  // can still use the activity embed optimization.
+  if (!flags.noActivity && isDiscord && !language) {
     useLanguage = undefined;
   }
 
@@ -154,7 +156,7 @@ export const handleStatus = async (
       authorHandle ?? '',
       fetchWithThreads,
       blueskyBuildHostFromContext(c),
-      useActivity ? undefined : useLanguage,
+      useLanguage,
       undefined,
       blueskyActivityPdsOut
     )) as SocialThread;
