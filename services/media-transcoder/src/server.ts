@@ -7,6 +7,8 @@ import {
   buildPdsBlobUrl,
   buildSourceUrl,
   isAllowedPdsBlob,
+  isAllowedPdsEndpoint,
+  buildPdsBlobEndpoint,
   isAllowedSource,
   mosaicSourceUrls,
   outputFormat,
@@ -19,11 +21,13 @@ const MAX_DURATION = 30;
 const FETCH_TIMEOUT = 10_000;
 const FFMPEG_TIMEOUT = 45_000;
 const cache = new Map<string, { body: Buffer; type: string }>();
-const MAX_CACHE = 128;
+const MAX_CACHE_BYTES = 128 * 1024 * 1024;
+let cacheBytes = 0;
 let active = 0;
 const waiters: (() => void)[] = [];
+const inflight = new Map<string, Promise<{ body: Buffer; type: string }>>();
 async function limit<T>(fn: () => Promise<T>): Promise<T> {
-  if (active >= 8) await new Promise<void>(resolve => waiters.push(resolve));
+  if (active >= 1) await new Promise<void>(resolve => waiters.push(resolve));
   active++;
   try {
     return await fn();
@@ -33,9 +37,16 @@ async function limit<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 function putCache(key: string, value: { body: Buffer; type: string }) {
+  const old = cache.get(key);
+  if (old) cacheBytes -= old.body.length;
   cache.delete(key);
   cache.set(key, value);
-  while (cache.size > MAX_CACHE) cache.delete(cache.keys().next().value!);
+  cacheBytes += value.body.length;
+  while (cacheBytes > MAX_CACHE_BYTES && cache.size) {
+    const oldest = cache.keys().next().value!;
+    cacheBytes -= cache.get(oldest)!.body.length;
+    cache.delete(oldest);
+  }
 }
 
 export async function safeFetch(
@@ -100,7 +111,11 @@ export function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buffer> {
     const chunks: Buffer[] = [];
     let size = 0;
     let error = '';
-    const timer = setTimeout(() => child.kill('SIGKILL'), FFMPEG_TIMEOUT);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, FFMPEG_TIMEOUT);
     child.stdout.on('data', (part: Buffer) => {
       size += part.length;
       if (size <= MAX_OUTPUT) chunks.push(part);
@@ -110,12 +125,13 @@ export function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buffer> {
       error += part.toString();
     });
     child.on('error', reject);
+    child.stdin.on('error', () => undefined);
     child.on('close', code => {
       clearTimeout(timer);
       if (code === 0 && size <= MAX_OUTPUT) resolve(Buffer.concat(chunks));
       else
         reject(
-          new Error(error || (size > MAX_OUTPUT ? 'output too large' : `ffmpeg exited ${code}`))
+          new Error(error || (timedOut ? 'ffmpeg timed out' : size > MAX_OUTPUT ? 'output too large' : `ffmpeg exited ${code}`))
         );
     });
     child.stdin.end(input);
@@ -190,17 +206,41 @@ async function transcode(pathname: string, format: 'webp' | 'gif') {
   const key = `${pathname}:${format}`;
   const cached = cache.get(key);
   if (cached) return cached;
+  const existing = inflight.get(key);
+  if (existing) return existing;
   const source = buildSourceUrl(pathname.replace(/\.(?:webp|gif)$/i, '.mp4'));
-  const result = {
-    body: await limit(() =>
-      safeFetch(source, isAllowedSource)
-        .then(readResponse)
-        .then(input => ffmpeg(input, format))
-    ),
-    type: format === 'webp' ? 'image/webp' : 'image/gif'
+  const work = (async () => {
+    const result = {
+      body: await limit(() =>
+        safeFetch(source, isAllowedSource)
+          .then(readResponse)
+          .then(input => ffmpeg(input, format))
+      ),
+      type: format === 'webp' ? 'image/webp' : 'image/gif'
+    };
+    putCache(key, result);
+    return result;
+  })();
+  inflight.set(key, work);
+  try {
+    return await work;
+  } finally {
+    inflight.delete(key);
+  }
+}
+async function resolvePdsBlob(did: string, cid: string): Promise<string> {
+  const plc = await safeFetch(`https://plc.directory/${encodeURIComponent(did)}`, value => {
+    try { return new URL(value).hostname === 'plc.directory'; } catch { return false; }
+  });
+  const document = (await plc.json()) as {
+    service?: Array<{ id?: string; type?: string; serviceEndpoint?: string }>;
   };
-  putCache(key, result);
-  return result;
+  const service = document.service?.find(
+    item => item.id === '#atproto_pds' && item.type === 'AtprotoPersonalDataServer'
+  );
+  if (!service?.serviceEndpoint || !isAllowedPdsEndpoint(service.serviceEndpoint))
+    throw new Error('no approved Bluesky PDS');
+  return buildPdsBlobEndpoint(service.serviceEndpoint, did, cid);
 }
 function mediaHeaders(type: string, length?: number) {
   return {
@@ -225,11 +265,8 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
     if (mosaicMatch) {
       const parts = mosaicMatch[2].slice(1).split('/');
       const urls = parts.map(part =>
-        part.startsWith('did:plc:') || part.includes('_')
-          ? buildPdsBlobUrl(
-              `did:plc:${part.split('_')[0].replace(/^did:plc:/, '')}`,
-              part.split('_')[1] || ''
-            )
+        /^did:plc:[a-z2-7]{20,}_[A-Za-z0-9][A-Za-z0-9._~-]{10,}$/.test(part)
+          ? buildPdsBlobUrl(`did:plc:${part.split('_')[0].slice(8)}`, part.split('_')[1])
           : `https://pbs.twimg.com/media/${part}?format=jpg&name=large`
       );
       const r = await mosaic(urls, mosaicMatch[1] as 'jpeg' | 'webp');
@@ -275,10 +312,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
     if (directBluesky) {
       const did = `did:plc:${decodeURIComponent(directBluesky[2])}`;
       const cid = decodeURIComponent(directBluesky[3]);
-      const source = `https://video.bsky.app/watch/${encodeURIComponent(did)}/${encodeURIComponent(cid)}/playlist.m3u8`;
+      const source = await resolvePdsBlob(did, cid);
       const upstream = await safeFetch(source, isAllowedSource);
       const body = await readResponse(upstream);
-      res.writeHead(200, mediaHeaders('application/vnd.apple.mpegurl', body.length));
+      res.writeHead(
+        upstream.status,
+        mediaHeaders(upstream.headers.get('content-type') || 'video/mp4', body.length)
+      );
       return req.method === 'HEAD' ? res.end() : res.end(body);
     }
     if (url.pathname === '/pds-cache') {

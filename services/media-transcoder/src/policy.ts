@@ -1,7 +1,7 @@
 import { URL } from 'node:url';
 
 const TWITTER_HOSTS = new Set(['video.twimg.com', 'pbs.twimg.com']);
-const BLUESKY_HOSTS = new Set(['cdn.bsky.app', 'video.bsky.app', 'bsky.network']);
+const BLUESKY_HOSTS = new Set(['cdn.bsky.app', 'video.bsky.app', 'bsky.network', 'plc.directory']);
 const PRIVATE_HOST =
   /^(localhost|0|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|::1|fc|fd)/i;
 const CID = /^[a-zA-Z0-9][a-zA-Z0-9._~-]{10,}$/;
@@ -56,6 +56,28 @@ export const isAllowedPdsBlob = (value: string): boolean => {
   } catch {
     return false;
   }
+};
+
+export const isAllowedPdsEndpoint = (value: string): boolean => {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      !PRIVATE_HOST.test(url.hostname) &&
+      (url.hostname === 'bsky.network' || url.hostname.endsWith('.bsky.network'))
+    );
+  } catch {
+    return false;
+  }
+};
+
+export const buildPdsBlobEndpoint = (pds: string, did: string, cid: string): string => {
+  if (!isAllowedPdsEndpoint(pds) || !DID.test(did) || !CID.test(cid))
+    throw new Error('invalid PDS, DID or CID');
+  const url = new URL('/xrpc/com.atproto.sync.getBlob', pds);
+  url.searchParams.set('did', did);
+  url.searchParams.set('cid', cid);
+  return url.toString();
 };
 
 export const buildPdsBlobUrl = (did: string, cid: string): string => {

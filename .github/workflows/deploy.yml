@@ -51,6 +51,7 @@ jobs:
           [[containers]]
           class_name = "MediaTranscoder"
           image = "./services/media-transcoder/Dockerfile"
+          instance_type = "standard2"
           max_instances = 4
           [[durable_objects.bindings]]
           class_name = "MediaTranscoder"
