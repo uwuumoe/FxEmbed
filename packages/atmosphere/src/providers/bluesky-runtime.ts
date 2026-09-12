@@ -15,7 +15,7 @@ export type BlueskyProviderEnv = {
 const defaultEnv: BlueskyProviderEnv = {
   apiRoot: 'https://public.api.bsky.app',
   webRoot: 'https://bsky.app',
-  videoBase: 'https://video.bsky.app',
+  videoBase: 'https://pds-cache.fxbsky.app',
   mosaicBskyDomainList: [],
   polyglotDomainList: []
 };

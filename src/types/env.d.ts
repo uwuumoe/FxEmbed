@@ -21,6 +21,7 @@ declare namespace NodeJS {
     GIF_TRANSCODE_DOMAIN_LIST?: string;
     VIDEO_TRANSCODE_DOMAIN_LIST?: string;
     VIDEO_TRANSCODE_BSKY_DOMAIN_LIST?: string;
+    BLUESKY_VIDEO_BASE?: string;
     PBS_PROXY_DOMAIN_LIST?: string;
     TWITTER_ROOT?: string;
     INSTAGRAM_ROOT?: string;

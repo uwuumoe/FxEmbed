@@ -49,7 +49,7 @@ export const Constants = {
   TWITTER_API_ROOT: 'https://api.x.com',
   TWITTER_VIDEO_BASE: 'https://video.twimg.com',
   BLUESKY_ROOT: 'https://bsky.app',
-  BLUESKY_VIDEO_BASE: 'https://video.bsky.app',
+  BLUESKY_VIDEO_BASE: process.env.BLUESKY_VIDEO_BASE || 'https://pds-cache.fxbsky.app',
   BLUESKY_API_ROOT: 'https://public.api.bsky.app',
   TIKTOK_ROOT: 'https://www.tiktok.com',
   TIKTOK_API_HOST: 'https://api16-normal-c-useast1a.tiktokv.com',

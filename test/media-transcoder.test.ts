@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { buildSourceUrl, isAllowedSource, outputFormat, mosaicSourceUrls } from '../services/media-transcoder/src/policy';
+import { buildBlueskyVideoUrl, buildSourceUrl, isAllowedSource, outputFormat, mosaicSourceUrls } from '../services/media-transcoder/src/policy';
 
 describe('media replacement policy', () => {
   test('maps tweet_video animation paths to the fixed Twitter CDN', () => {
@@ -18,5 +18,11 @@ describe('media replacement policy', () => {
   test('builds bounded Bluesky mosaic sources only from blob URLs', () => {
     expect(mosaicSourceUrls(['https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:abc/bafk1@jpeg', 'https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:def/bafk2@jpeg'])).toHaveLength(2);
     expect(() => mosaicSourceUrls(Array.from({ length: 5 }, (_, i) => `https://cdn.bsky.app/${i}`))).toThrow();
+  });
+  test('builds the exact public Bluesky DID/CID video route', () => {
+    expect(buildBlueskyVideoUrl('https://pds-cache.fxbsky.app/', 'did:plc:abcdefghijklmnopqrst', 'bafybeigdyrzt5x')).toBe(
+      'https://pds-cache.fxbsky.app/did:plc:abcdefghijklmnopqrst/bafybeigdyrzt5x'
+    );
+    expect(() => buildBlueskyVideoUrl('http://127.0.0.1', 'did:plc:abcdefghijklmnopqrst', 'bafybeigdyrzt5x')).toThrow();
   });
 });

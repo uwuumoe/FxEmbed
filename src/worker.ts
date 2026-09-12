@@ -305,8 +305,13 @@ export default {
         ...Constants.PBS_PROXY_DOMAIN_LIST
       ].filter(Boolean)
     );
+    try {
+      mediaHosts.add(new URL(Constants.BLUESKY_VIDEO_BASE).hostname);
+    } catch {
+      // Invalid optional configuration must not widen the proxy policy.
+    }
     const mediaPath =
-      /^(\/tweet_video\/.*\.(?:webp|gif)|\/(?:jpeg|webp)\/|\/mosaic(?:$|\/)|\/video$|\/pds-cache$)/i.test(
+      /^(\/tweet_video\/[^/]+\.(?:webp|gif)|\/(?:jpeg|webp)\/|\/mosaic(?:$|\/)|\/video(?:$|\/)|\/pds-cache(?:$|\/)|\/did%3aplc%3a|\/did:plc:)/i.test(
         requestUrl.pathname
       );
     const mediaBinding = (env as Env & { MEDIA_TRANSCODER?: DurableObjectNamespace })

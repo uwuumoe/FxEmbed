@@ -63,4 +63,12 @@ export const buildPdsBlobUrl = (did: string, cid: string): string => {
   return `https://cdn.bsky.app/img/feed_fullsize/plain/${did}/${cid}@jpeg`;
 };
 
+export const buildBlueskyVideoUrl = (base: string, did: string, cid: string): string => {
+  if (!DID.test(did) || !CID.test(cid)) throw new Error('invalid DID or CID');
+  const root = new URL(base);
+  if (root.protocol !== 'https:' || PRIVATE_HOST.test(root.hostname))
+    throw new Error('invalid video host');
+  return `${root.toString().replace(/\/$/, '')}/${did}/${cid}`;
+};
+
 export const isDid = (value: string) => DID.test(value);

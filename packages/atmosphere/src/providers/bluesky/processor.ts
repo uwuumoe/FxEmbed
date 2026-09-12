@@ -287,7 +287,7 @@ const applyEmbedsToStatus = async (apiStatus: APIStatus, status: BlueskyPost): P
       primary?.video?.ref?.$link;
     if (cid && authorDid) {
       apiStatus.embed_card = 'player';
-      const videoUrl = `https://pds-cache.fxbsky.app/${authorDid}/${cid}`;
+      const videoUrl = `${getBlueskyProviderEnv().videoBase.replace(/\/$/, '')}/${encodeURIComponent(authorDid)}/${encodeURIComponent(cid)}`;
       const aspectRatio =
         primary?.aspectRatio ??
         primary?.media?.aspectRatio ??

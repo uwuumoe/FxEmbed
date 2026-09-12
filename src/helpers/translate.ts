@@ -12,6 +12,29 @@ const getDomain = (): string | null => {
   return polyglotDomains[Math.floor(Math.random() * polyglotDomains.length)];
 };
 
+/** Preserve the original public translation contract when Polyglot is unset. */
+const translateWithMyMemory = async (
+  status: APITwitterStatus | APIBlueskyStatus | APIMastodonStatus | APIStatus,
+  language: string
+): Promise<PolyglotTranslation | null> => {
+  if (!status.text?.trim() || !status.lang?.trim()) return null;
+  const query = new URLSearchParams({ q: status.text, langpair: `${status.lang}|${language}` });
+  try {
+    const response = await fetch(`https://api.mymemory.translated.net/get?${query}`);
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      responseData?: { translatedText?: string };
+      responseStatus?: number;
+    };
+    const translatedText = data.responseData?.translatedText;
+    if (!translatedText || data.responseStatus !== 200) return null;
+    return { translated_text: translatedText, source_lang: status.lang, target_lang: language };
+  } catch (error) {
+    console.error('MyMemory translation failed', error);
+    return null;
+  }
+};
+
 /* Handles translating statuses when asked! */
 export const translateStatus = async (
   status: APITwitterStatus | APIBlueskyStatus | APIMastodonStatus | APIStatus,
@@ -23,7 +46,8 @@ export const translateStatus = async (
   console.log('Using Polyglot translation');
   const domain = getDomain();
   if (!domain) {
-    return null;
+    console.log('Using MyMemory translation');
+    return translateWithMyMemory(status, language);
   }
   try {
     const response = await fetch(`https://${domain}/translate`, {
