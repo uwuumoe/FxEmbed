@@ -135,12 +135,15 @@ export const app = new Hono<{
     } else if (Constants.ATMOSPHERE_API_HOST_LIST.includes(url.hostname)) {
       realm = 'atmosphere';
       console.log('Atmosphere API realm');
+    } else if (
+      Constants.STANDARD_BSKY_DOMAIN_LIST.includes(url.hostname) ||
+      Constants.STANDARD_BSKY_DOMAIN_LIST.includes(baseHostName)
+    ) {
+      realm = 'bluesky';
+      console.log('Bluesky realm');
     } else if (Constants.STANDARD_DOMAIN_LIST.includes(baseHostName)) {
       realm = 'twitter';
       console.log('Twitter realm');
-    } else if (Constants.STANDARD_BSKY_DOMAIN_LIST.includes(baseHostName)) {
-      realm = 'bluesky';
-      console.log('Bluesky realm');
     } else if (Constants.STANDARD_TIKTOK_DOMAIN_LIST.includes(baseHostName)) {
       realm = 'tiktok';
       console.log('TikTok realm');
