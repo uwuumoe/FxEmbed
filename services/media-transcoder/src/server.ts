@@ -92,7 +92,7 @@ export function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buffer> {
     ];
     args.push(
       ...(format === 'webp'
-        ? ['-c:v', 'libwebp_anim', '-loop', '0', '-f', 'webp']
+        ? ['-c:v', 'libwebp_anim', '-q:v', '60', '-loop', '0', '-f', 'webp']
         : ['-loop', '0', '-f', 'gif']),
       'pipe:1'
     );
