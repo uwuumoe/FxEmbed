@@ -20,11 +20,11 @@ const MAX_OUTPUT = 64 * 1024 * 1024;
 const MAX_DURATION = 30;
 const FETCH_TIMEOUT = 10_000;
 const FFMPEG_TIMEOUT = 45_000;
-const cache = new Map<string, { body: Buffer; type: string }>();
-const MAX_CACHE_BYTES = 128 * 1024 * 1024;
-let cacheBytes = 0;
 let active = 0;
 const waiters: (() => void)[] = [];
+// In-flight request coalescing only: identical concurrent requests share one
+// computation, but no results are stored. Result caching lives in the Workers
+// Cache API at the edge; the container is compute only.
 const inflight = new Map<string, Promise<{ body: Buffer; type: string }>>();
 async function limit<T>(fn: () => Promise<T>): Promise<T> {
   if (active >= 1) await new Promise<void>(resolve => waiters.push(resolve));
@@ -36,20 +36,7 @@ async function limit<T>(fn: () => Promise<T>): Promise<T> {
     waiters.shift()?.();
   }
 }
-function putCache(key: string, value: { body: Buffer; type: string }) {
-  const old = cache.get(key);
-  if (old) cacheBytes -= old.body.length;
-  cache.delete(key);
-  cache.set(key, value);
-  cacheBytes += value.body.length;
-  while (cacheBytes > MAX_CACHE_BYTES && cache.size) {
-    const oldest = cache.keys().next().value!;
-    cacheBytes -= cache.get(oldest)!.body.length;
-    cache.delete(oldest);
-  }
-}
-
-export async function safeFetch(
+async function safeFetch(
   url: string,
   allowed: (url: string) => boolean,
   init: RequestInit = {}
@@ -224,13 +211,11 @@ export async function mosaic(urls: string[], format: 'jpeg' | 'webp'): Promise<B
 }
 async function transcode(pathname: string, format: 'webp' | 'gif') {
   const key = `${pathname}:${format}`;
-  const cached = cache.get(key);
-  if (cached) return cached;
   const existing = inflight.get(key);
   if (existing) return existing;
   const source = buildSourceUrl(pathname.replace(/\.(?:webp|gif)$/i, '.mp4'));
   const work = (async () => {
-    const result = {
+    return {
       body: await limit(() =>
         safeFetch(source, isAllowedSource)
           .then(readResponse)
@@ -238,8 +223,6 @@ async function transcode(pathname: string, format: 'webp' | 'gif') {
       ),
       type: format === 'webp' ? 'image/webp' : 'image/gif'
     };
-    putCache(key, result);
-    return result;
   })();
   inflight.set(key, work);
   try {
@@ -381,15 +364,10 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         res.writeHead(400);
         return res.end('invalid PDS blob');
       }
-      const key = `pds:${source}`;
-      let r = cache.get(key);
-      if (!r) {
-        r = {
-          body: await limit(() => safeFetch(source, isAllowedPdsBlob).then(readResponse)),
-          type: 'application/octet-stream'
-        };
-        putCache(key, r);
-      }
+      const r = {
+        body: await limit(() => safeFetch(source, isAllowedPdsBlob).then(readResponse)),
+        type: 'application/octet-stream'
+      };
       res.writeHead(200, mediaHeaders(r.type, r.body.length));
       return req.method === 'HEAD' ? res.end() : res.end(r.body);
     }
