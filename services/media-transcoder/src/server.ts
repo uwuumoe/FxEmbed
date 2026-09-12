@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -101,11 +101,12 @@ export function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buffer> {
       '-vf',
       'fps=10,scale=960:-2:force_original_aspect_ratio=decrease'
     ];
+    const outputPath = join(tmpdir(), `fxembed-${process.pid}-${Date.now()}-${Math.random()}.${format}`);
     args.push(
       ...(format === 'webp'
         ? ['-c:v', 'libwebp_anim', '-q:v', '60', '-loop', '0', '-f', 'webp']
         : ['-loop', '0', '-f', 'gif']),
-      'pipe:1'
+      outputPath
     );
     const child = spawn('ffmpeg', args);
     const chunks: Buffer[] = [];
@@ -128,16 +129,18 @@ export function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buffer> {
     child.stdin.on('error', () => undefined);
     child.on('close', code => {
       clearTimeout(timer);
-      if (code === 0 && size <= MAX_OUTPUT) {
-        const body = Buffer.concat(chunks);
-        // WebP's RIFF muxer cannot seek on pipe:1; repair its final size.
-        if (format === 'webp' && body.length >= 8 && body.toString('ascii', 0, 4) === 'RIFF')
-          body.writeUInt32LE(body.length - 8, 4);
-        resolve(body);
-      } else
-        reject(
-          new Error(error || (timedOut ? 'ffmpeg timed out' : size > MAX_OUTPUT ? 'output too large' : `ffmpeg exited ${code}`))
-        );
+      if (code !== 0) {
+        void unlink(outputPath).catch(() => undefined);
+        reject(new Error(error || (timedOut ? 'ffmpeg timed out' : `ffmpeg exited ${code}`)));
+        return;
+      }
+      void readFile(outputPath)
+        .then(body => {
+          if (body.length > MAX_OUTPUT) throw new Error('output too large');
+          resolve(body);
+        })
+        .catch(reject)
+        .finally(() => unlink(outputPath).catch(() => undefined));
     });
     child.stdin.end(input);
   });
