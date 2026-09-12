@@ -89,7 +89,7 @@ import { atmosphere } from './realms/atmosphere/router';
 import { getBranding } from './helpers/branding';
 import { tiktok } from './realms/tiktok/router';
 import { instagram } from './realms/instagram/router';
-export { MediaTranscoderV2 } from './media-container';
+export { MediaTranscoder, MediaTranscoderV2 } from './media-container';
 
 const noCache = 'max-age=0, no-cache, no-store, must-revalidate';
 const embeddingClientRegex =
