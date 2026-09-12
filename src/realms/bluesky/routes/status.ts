@@ -9,11 +9,13 @@ import { isHorizonEmbedParam } from '../../twitter/router';
 
 export const blueskyStatusRequest = async (c: Context) => {
   console.log('bluesky status request!!!');
-  const { handle, id, language } = c.req.param();
+  const { handle, id } = c.req.param();
+  const url = new URL(c.req.url);
+  const language =
+    c.req.param('language') ?? url.pathname.match(/\/post\/[^/]+\/([a-z]{2,5})(?:\/)?$/i)?.[1];
   const actualId = id.match(/\w+/g)?.[0] ?? '';
 
   const userAgent = c.req.header('User-Agent') || '';
-  const url = new URL(c.req.url);
   const flags: InputFlags = {};
 
   /* User Agent matching for embed generators, bots, crawlers, and other automated
