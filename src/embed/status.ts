@@ -177,6 +177,28 @@ export const handleStatus = async (
       ? await withLocalizedTombstoneMessage(rawStatus, language)
       : ((rawStatus as APIStatus | APITwitterStatus | null) ?? null);
 
+  // Keep the initial HTML translated even when the provider processor cannot
+  // attach its translation before the deferred Discord activity path.
+  if (
+    provider === DataProvider.Bluesky &&
+    status &&
+    !isTombstone(status) &&
+    language &&
+    language !== status.lang &&
+    !status.translation
+  ) {
+    const translated = await blueskyBuildHostFromContext(c).translatePolyglot?.(status, language);
+    if (translated?.translated_text) {
+      status.translation = {
+        text: translated.translated_text,
+        source_lang: (translated.source_lang ?? status.lang ?? 'en').toLowerCase(),
+        target_lang: language.toLowerCase(),
+        source_lang_en: translated.source_lang ?? status.lang ?? 'en',
+        provider: translated.provider ?? 'polyglot'
+      };
+    }
+  }
+
   const api = {
     code: thread.code,
     message: '',
