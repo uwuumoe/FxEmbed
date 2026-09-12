@@ -60,7 +60,8 @@ jobs:
           tag = "media-transcoder-v1"
           EOF
       - name: Deploy with Wrangler
-        run: npx wrangler deploy --no-bundle --containers-rollout=none
+        # Publish the container image as part of the production deployment.
+        run: npx wrangler deploy --no-bundle
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           STANDARD_DOMAIN_LIST: ${{ vars.STANDARD_DOMAIN_LIST }}

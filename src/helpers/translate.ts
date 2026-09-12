@@ -4,7 +4,7 @@ import { Constants } from '../constants';
 import { normalizeLanguage } from './language';
 
 const getDomain = (): string | null => {
-  const polyglotDomains: string[] = Constants.POLYGLOT_DOMAIN_LIST;
+  const polyglotDomains: string[] = Constants.POLYGLOT_DOMAIN_LIST.filter(Boolean);
   if (polyglotDomains.length === 0) {
     return null;
   }
