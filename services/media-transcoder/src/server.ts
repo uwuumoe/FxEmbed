@@ -313,12 +313,19 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
       const did = `did:plc:${decodeURIComponent(directBluesky[2])}`;
       const cid = decodeURIComponent(directBluesky[3]);
       const source = await resolvePdsBlob(did, cid);
-      const upstream = await safeFetch(source, isAllowedSource);
+      const headers: Record<string, string> = {};
+      if (req.headers.range) headers.range = req.headers.range;
+      const upstream = await safeFetch(source, isAllowedSource, { headers });
       const body = await readResponse(upstream);
-      res.writeHead(
-        upstream.status,
-        mediaHeaders(upstream.headers.get('content-type') || 'video/mp4', body.length)
+      const responseHeaders: Record<string, string> = mediaHeaders(
+        upstream.headers.get('content-type') || 'video/mp4',
+        body.length
       );
+      for (const header of ['content-range', 'accept-ranges']) {
+        const value = upstream.headers.get(header);
+        if (value) responseHeaders[header] = value;
+      }
+      res.writeHead(upstream.status, responseHeaders);
       return req.method === 'HEAD' ? res.end() : res.end(body);
     }
     if (url.pathname === '/pds-cache') {
