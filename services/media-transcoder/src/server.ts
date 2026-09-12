@@ -88,7 +88,7 @@ export function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buffer> {
       'pipe:0',
       '-an',
       '-vf',
-      'fps=15,scale=1280:-2:force_original_aspect_ratio=decrease'
+      'fps=10,scale=960:-2:force_original_aspect_ratio=decrease'
     ];
     args.push(
       ...(format === 'webp'
