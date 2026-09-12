@@ -64,7 +64,15 @@ export const translateStatus = async (
 
     if (!response.ok) {
       console.error('Polyglot translation failed', data);
-      return null;
+      return translateWithMyMemory(status, language);
+    }
+
+    // A provider can return HTTP 200 while echoing the source text. Treat that
+    // as a failed translation so the public MyMemory contract remains useful.
+    const translatedText = data.translated_text?.trim();
+    if (!translatedText || translatedText === status.text?.trim()) {
+      console.warn('Polyglot returned source text; using MyMemory fallback');
+      return translateWithMyMemory(status, language);
     }
 
     console.log('Polyglot translation successful', data.translated_text);
