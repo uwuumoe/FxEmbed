@@ -271,6 +271,16 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         if (!res.write(chunk)) await new Promise<void>(resolve => res.once('drain', resolve));
       return res.end();
     }
+    const directBluesky = url.pathname.match(/^\/(did%3Aplc%3A|did:plc:)([^/]+)\/([^/]+)$/i);
+    if (directBluesky) {
+      const did = `did:plc:${decodeURIComponent(directBluesky[2])}`;
+      const cid = decodeURIComponent(directBluesky[3]);
+      const source = `https://video.bsky.app/watch/${encodeURIComponent(did)}/${encodeURIComponent(cid)}/playlist.m3u8`;
+      const upstream = await safeFetch(source, isAllowedSource);
+      const body = await readResponse(upstream);
+      res.writeHead(200, mediaHeaders('application/vnd.apple.mpegurl', body.length));
+      return req.method === 'HEAD' ? res.end() : res.end(body);
+    }
     if (url.pathname === '/pds-cache') {
       let source = url.searchParams.get('url') || '';
       if (!source) {

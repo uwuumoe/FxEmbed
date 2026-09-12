@@ -1,7 +1,7 @@
 import { URL } from 'node:url';
 
 const TWITTER_HOSTS = new Set(['video.twimg.com', 'pbs.twimg.com']);
-const BLUESKY_HOSTS = new Set(['cdn.bsky.app', 'bsky.network']);
+const BLUESKY_HOSTS = new Set(['cdn.bsky.app', 'video.bsky.app', 'bsky.network']);
 const PRIVATE_HOST =
   /^(localhost|0|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|::1|fc|fd)/i;
 const CID = /^[a-zA-Z0-9][a-zA-Z0-9._~-]{10,}$/;
