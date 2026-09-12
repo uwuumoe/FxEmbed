@@ -21,10 +21,14 @@ describe('media replacement policy', () => {
   });
 
   test('builds bounded Bluesky mosaic sources only from blob URLs', () => {
-    expect(mosaicSourceUrls([
-      'https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:abc/bafk1@jpeg',
-      'https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:def/bafk2@jpeg'
-    ])).toHaveLength(2);
-    expect(() => mosaicSourceUrls(Array.from({ length: 5 }, (_, i) => `https://cdn.bsky.app/${i}`))).toThrow();
+    expect(
+      mosaicSourceUrls([
+        'https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:abc/bafk1@jpeg',
+        'https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:def/bafk2@jpeg'
+      ])
+    ).toHaveLength(2);
+    expect(() =>
+      mosaicSourceUrls(Array.from({ length: 5 }, (_, i) => `https://cdn.bsky.app/${i}`))
+    ).toThrow();
   });
 });

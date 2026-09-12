@@ -89,6 +89,7 @@ import { atmosphere } from './realms/atmosphere/router';
 import { getBranding } from './helpers/branding';
 import { tiktok } from './realms/tiktok/router';
 import { instagram } from './realms/instagram/router';
+export { MediaTranscoder } from './media-container';
 
 const noCache = 'max-age=0, no-cache, no-store, must-revalidate';
 const embeddingClientRegex =
@@ -111,6 +112,7 @@ export const app = new Hono<{
     CREDENTIAL_KEY?: string;
     EXCEPTION_DISCORD_WEBHOOK?: string;
     AnalyticsEngine: AnalyticsEngineDataset;
+    MEDIA_TRANSCODER: DurableObjectNamespace;
   };
 }>({
   getPath: req => {
@@ -292,6 +294,27 @@ app.all('/error', async c => {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    const requestUrl = new URL(request.url);
+    const mediaHosts = new Set(
+      [
+        ...Constants.GIF_TRANSCODE_DOMAIN_LIST,
+        ...Constants.VIDEO_TRANSCODE_DOMAIN_LIST,
+        ...Constants.VIDEO_TRANSCODE_BSKY_DOMAIN_LIST,
+        ...Constants.MOSAIC_DOMAIN_LIST,
+        ...Constants.MOSAIC_BSKY_DOMAIN_LIST,
+        ...Constants.PBS_PROXY_DOMAIN_LIST
+      ].filter(Boolean)
+    );
+    const mediaPath =
+      /^(\/tweet_video\/.*\.(?:webp|gif)|\/(?:jpeg|webp)\/|\/mosaic(?:$|\/)|\/video$|\/pds-cache$)/i.test(
+        requestUrl.pathname
+      );
+    const mediaBinding = (env as Env & { MEDIA_TRANSCODER?: DurableObjectNamespace })
+      .MEDIA_TRANSCODER;
+    if (mediaHosts.has(requestUrl.hostname) && mediaPath && mediaBinding) {
+      const id = mediaBinding.idFromName('global-media-transcoder');
+      return mediaBinding.get(id).fetch(request);
+    }
     const assetFetcher = (env as Env & { ASSETS?: Fetcher }).ASSETS;
     if (assetFetcher && new URL(request.url).pathname === '/catgirlicon.png') {
       return assetFetcher.fetch(request);

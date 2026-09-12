@@ -147,6 +147,7 @@ await esbuild.build({
   outdir: 'dist',
   minify: true,
   bundle: true,
+  external: ['cloudflare:workers'],
   format: 'esm',
   plugins: plugins,
   define: defines

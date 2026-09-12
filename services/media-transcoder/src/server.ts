@@ -1,19 +1,53 @@
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSourceUrl, isAllowedPdsBlob, isAllowedSource, mosaicSourceUrls, outputFormat } from './policy.js';
+import {
+  buildPdsBlobUrl,
+  buildSourceUrl,
+  isAllowedPdsBlob,
+  isAllowedSource,
+  mosaicSourceUrls,
+  outputFormat,
+  isDid
+} from './policy.js';
 
 const MAX_INPUT = 32 * 1024 * 1024;
 const MAX_OUTPUT = 64 * 1024 * 1024;
+const MAX_DURATION = 30;
+const FETCH_TIMEOUT = 10_000;
+const FFMPEG_TIMEOUT = 45_000;
 const cache = new Map<string, { body: Buffer; type: string }>();
+const MAX_CACHE = 128;
+let active = 0;
+const waiters: (() => void)[] = [];
+async function limit<T>(fn: () => Promise<T>): Promise<T> {
+  if (active >= 8) await new Promise<void>(resolve => waiters.push(resolve));
+  active++;
+  try {
+    return await fn();
+  } finally {
+    active--;
+    waiters.shift()?.();
+  }
+}
+function putCache(key: string, value: { body: Buffer; type: string }) {
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > MAX_CACHE) cache.delete(cache.keys().next().value!);
+}
 
-async function safeFetch(url: string, allowed: (url: string) => boolean): Promise<Response> {
+export async function safeFetch(
+  url: string,
+  allowed: (url: string) => boolean,
+  init: RequestInit = {}
+): Promise<Response> {
   let current = url;
   for (let redirects = 0; redirects <= 3; redirects++) {
     if (!allowed(current)) throw new Error('upstream host is not allowed');
-    const response = await fetch(current, { redirect: 'manual' });
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT);
+    const response = await fetch(current, { ...init, signal, redirect: 'manual' });
     if (response.status < 300 || response.status >= 400) return response;
     const location = response.headers.get('location');
     if (!location) throw new Error('redirect without location');
@@ -21,90 +55,257 @@ async function safeFetch(url: string, allowed: (url: string) => boolean): Promis
   }
   throw new Error('too many redirects');
 }
-
 async function readResponse(response: Response): Promise<Buffer> {
   if (!response.ok) throw new Error(`upstream returned ${response.status}`);
   const length = Number(response.headers.get('content-length') || 0);
   if (length > MAX_INPUT) throw new Error('input too large');
-  const body = Buffer.from(await response.arrayBuffer());
-  if (body.length > MAX_INPUT) throw new Error('input too large');
-  return body;
+  if (!response.body) throw new Error('upstream has no body');
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > MAX_INPUT) throw new Error('input too large');
+      chunks.push(Buffer.from(part.value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, size);
 }
-
-function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buffer> {
+export function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const args = ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-an', '-vf', 'fps=15,scale=1280:-2:force_original_aspect_ratio=decrease'];
-    if (format === 'webp') args.push('-c:v', 'libwebp_anim', '-loop', '0', '-f', 'webp');
-    else args.push('-loop', '0', '-f', 'gif');
-    args.push('pipe:1');
+    const args = [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-t',
+      String(MAX_DURATION),
+      '-i',
+      'pipe:0',
+      '-an',
+      '-vf',
+      'fps=15,scale=1280:-2:force_original_aspect_ratio=decrease'
+    ];
+    args.push(
+      ...(format === 'webp'
+        ? ['-c:v', 'libwebp_anim', '-loop', '0', '-f', 'webp']
+        : ['-loop', '0', '-f', 'gif']),
+      'pipe:1'
+    );
     const child = spawn('ffmpeg', args);
     const chunks: Buffer[] = [];
     let size = 0;
-    child.stdout.on('data', (part: Buffer) => { size += part.length; if (size <= MAX_OUTPUT) chunks.push(part); else child.kill('SIGKILL'); });
     let error = '';
-    child.stderr.on('data', part => { error += part.toString(); });
+    const timer = setTimeout(() => child.kill('SIGKILL'), FFMPEG_TIMEOUT);
+    child.stdout.on('data', (part: Buffer) => {
+      size += part.length;
+      if (size <= MAX_OUTPUT) chunks.push(part);
+      else child.kill('SIGKILL');
+    });
+    child.stderr.on('data', part => {
+      error += part.toString();
+    });
     child.on('error', reject);
-    child.on('close', code => code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(error || `ffmpeg exited ${code}`)));
+    child.on('close', code => {
+      clearTimeout(timer);
+      if (code === 0 && size <= MAX_OUTPUT) resolve(Buffer.concat(chunks));
+      else
+        reject(
+          new Error(error || (size > MAX_OUTPUT ? 'output too large' : `ffmpeg exited ${code}`))
+        );
+    });
     child.stdin.end(input);
   });
 }
-
-async function mosaic(urls: string[], format: 'jpeg' | 'webp'): Promise<Buffer> {
-  const inputs = await Promise.all(mosaicSourceUrls(urls).map(async (source: string) => readResponse(await safeFetch(source, isAllowedSource))));
+async function runMosaic(inputs: Buffer[], format: 'jpeg' | 'webp'): Promise<Buffer> {
   const dir = await mkdtemp(join(tmpdir(), 'fxembed-mosaic-'));
   try {
-    const files = await Promise.all(inputs.map((input: Buffer, index: number) => { const file = join(dir, `${index}.img`); return writeFile(file, input).then(() => file); }));
+    const files = await Promise.all(
+      inputs.map((input, i) => {
+        const file = join(dir, `${i}.img`);
+        return writeFile(file, input).then(() => file);
+      })
+    );
     return await new Promise((resolve, reject) => {
       const args = ['-hide_banner', '-loglevel', 'error'];
       for (const file of files) args.push('-i', file);
-      args.push('-filter_complex', `tile=${Math.min(2, inputs.length)}x${Math.ceil(inputs.length / 2)}:padding=8:margin=8`, '-frames:v', '1', '-f', format === 'jpeg' ? 'mjpeg' : 'webp', 'pipe:1');
-      const child = spawn('ffmpeg', args); const chunks: Buffer[] = []; let size = 0;
-      child.stdout.on('data', (part: Buffer) => { size += part.length; if (size <= MAX_OUTPUT) chunks.push(part); else child.kill('SIGKILL'); });
-      let error = ''; child.stderr.on('data', part => { error += part.toString(); });
-      child.on('error', reject); child.on('close', code => code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(error || `ffmpeg exited ${code}`)));
-    });
-  } finally { await rm(dir, { recursive: true, force: true }); }
-}
+      const cols = Math.min(2, inputs.length);
 
+      const refs = inputs
+        .map(
+          (_, i) =>
+            `[${i}:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2[${i}v]`
+        )
+        .join(';');
+      const layout = inputs
+        .map((_, i) => `${(i % cols) * 640}_${Math.floor(i / cols) * 360}`)
+        .join('|');
+      args.push(
+        '-filter_complex',
+        `${refs};${inputs.map((_, i) => `[${i}v]`).join('')}xstack=inputs=${inputs.length}:layout=${layout}:fill=black`,
+        '-frames:v',
+        '1',
+        '-f',
+        format === 'jpeg' ? 'mjpeg' : 'webp',
+        'pipe:1'
+      );
+      const child = spawn('ffmpeg', args);
+      const chunks: Buffer[] = [];
+      let size = 0;
+      let error = '';
+      const timer = setTimeout(() => child.kill('SIGKILL'), FFMPEG_TIMEOUT);
+      child.stdout.on('data', (part: Buffer) => {
+        size += part.length;
+        if (size <= MAX_OUTPUT) chunks.push(part);
+        else child.kill('SIGKILL');
+      });
+      child.stderr.on('data', p => {
+        error += p.toString();
+      });
+      child.on('error', reject);
+      child.on('close', code => {
+        clearTimeout(timer);
+        if (code === 0) resolve(Buffer.concat(chunks));
+        else reject(new Error(error || `ffmpeg exited ${code}`));
+      });
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+export async function mosaic(urls: string[], format: 'jpeg' | 'webp'): Promise<Buffer> {
+  const sources = mosaicSourceUrls(urls);
+  return limit(async () =>
+    runMosaic(
+      await Promise.all(sources.map(async s => readResponse(await safeFetch(s, isAllowedSource)))),
+      format
+    )
+  );
+}
 async function transcode(pathname: string, format: 'webp' | 'gif') {
   const key = `${pathname}:${format}`;
-  const cached = cache.get(key); if (cached) return cached;
+  const cached = cache.get(key);
+  if (cached) return cached;
   const source = buildSourceUrl(pathname.replace(/\.(?:webp|gif)$/i, '.mp4'));
-  const result = { body: await ffmpeg(await readResponse(await safeFetch(source, isAllowedSource)), format), type: format === 'webp' ? 'image/webp' : 'image/gif' };
-  if (result.body.length <= MAX_OUTPUT) cache.set(key, result);
+  const result = {
+    body: await limit(() =>
+      safeFetch(source, isAllowedSource)
+        .then(readResponse)
+        .then(input => ffmpeg(input, format))
+    ),
+    type: format === 'webp' ? 'image/webp' : 'image/gif'
+  };
+  putCache(key, result);
   return result;
 }
-
-const server = createServer(async (req, res) => {
+function mediaHeaders(type: string, length?: number) {
+  return {
+    'content-type': type,
+    'cache-control': 'public, max-age=86400, immutable',
+    ...(length === undefined ? {} : { 'content-length': String(length) })
+  };
+}
+export async function handle(req: IncomingMessage, res: ServerResponse) {
   try {
     const url = new URL(req.url || '/', 'http://localhost');
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.writeHead(405, { allow: 'GET, HEAD' });
+      return res.end();
+    }
     if (url.pathname.startsWith('/tweet_video/') && /\.(webp|gif)$/i.test(url.pathname)) {
-      const result = await transcode(url.pathname, outputFormat(url.pathname));
-      res.writeHead(200, { 'content-type': result.type, 'content-length': result.body.length, 'cache-control': 'public, max-age=86400, immutable' }); res.end(result.body); return;
+      const r = await transcode(url.pathname, outputFormat(url.pathname));
+      res.writeHead(200, mediaHeaders(r.type, r.body.length));
+      return req.method === 'HEAD' ? res.end() : res.end(r.body);
+    }
+    const mosaicMatch = url.pathname.match(/^\/(jpeg|webp)\/[^/]+((?:\/[^/]+){1,4})$/);
+    if (mosaicMatch) {
+      const parts = mosaicMatch[2].slice(1).split('/');
+      const urls = parts.map(part =>
+        part.startsWith('did:plc:') || part.includes('_')
+          ? buildPdsBlobUrl(
+              `did:plc:${part.split('_')[0].replace(/^did:plc:/, '')}`,
+              part.split('_')[1] || ''
+            )
+          : `https://pbs.twimg.com/media/${part}?format=jpg&name=large`
+      );
+      const r = await mosaic(urls, mosaicMatch[1] as 'jpeg' | 'webp');
+      res.writeHead(
+        200,
+        mediaHeaders(mosaicMatch[1] === 'webp' ? 'image/webp' : 'image/jpeg', r.length)
+      );
+      return req.method === 'HEAD' ? res.end() : res.end(r);
     }
     if (url.pathname === '/mosaic') {
       const format = url.searchParams.get('format') === 'webp' ? 'webp' : 'jpeg';
-      const result = await mosaic(url.searchParams.getAll('url'), format);
-      res.writeHead(200, { 'content-type': format === 'webp' ? 'image/webp' : 'image/jpeg', 'content-length': result.length, 'cache-control': 'public, max-age=86400' }); res.end(result); return;
+      const r = await mosaic(url.searchParams.getAll('url'), format);
+      res.writeHead(200, mediaHeaders(format === 'webp' ? 'image/webp' : 'image/jpeg', r.length));
+      return req.method === 'HEAD' ? res.end() : res.end(r);
     }
     if (url.pathname === '/video') {
       const source = url.searchParams.get('url') || '';
-      if (!isAllowedSource(source)) { res.writeHead(400); res.end('invalid source'); return; }
-      const upstream = await safeFetch(source, isAllowedSource); if (!upstream.ok || !upstream.body) { res.writeHead(upstream.status || 502); res.end(); return; }
-      res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') || 'video/mp4', 'cache-control': 'public, max-age=3600', ...(upstream.headers.get('content-length') ? { 'content-length': upstream.headers.get('content-length')! } : {}) });
-      for await (const chunk of upstream.body as AsyncIterable<Uint8Array>) res.write(chunk); res.end(); return;
+      if (!isAllowedSource(source)) {
+        res.writeHead(400);
+        return res.end('invalid source');
+      }
+      const headers: Record<string, string> = {};
+      const range = req.headers.range;
+      if (range) headers.range = range;
+      const upstream = await safeFetch(source, isAllowedSource, { headers });
+      if (!upstream.body) {
+        res.writeHead(502);
+        return res.end();
+      }
+      const out: Record<string, string> = {};
+      for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+        const v = upstream.headers.get(h);
+        if (v) out[h] = v;
+      }
+      out['cache-control'] = 'public, max-age=3600';
+      res.writeHead(upstream.status, out);
+      if (req.method === 'HEAD') return res.end();
+      for await (const chunk of upstream.body as AsyncIterable<Uint8Array>)
+        if (!res.write(chunk)) await new Promise<void>(resolve => res.once('drain', resolve));
+      return res.end();
     }
     if (url.pathname === '/pds-cache') {
-      const source = url.searchParams.get('url') || '';
-      if (!isAllowedPdsBlob(source)) { res.writeHead(400); res.end('invalid PDS blob'); return; }
-      const key = `pds:${source}`; const cached = cache.get(key);
-      const result = cached || { body: await readResponse(await safeFetch(source, isAllowedSource)), type: 'application/octet-stream' };
-      if (!cached) cache.set(key, result);
-      res.writeHead(200, { 'content-type': result.type, 'content-length': result.body.length, 'cache-control': 'public, max-age=86400' }); res.end(result.body); return;
+      let source = url.searchParams.get('url') || '';
+      if (!source) {
+        const did = url.searchParams.get('did') || '';
+        const cid = url.searchParams.get('cid') || '';
+        if (!isDid(did)) {
+          res.writeHead(400);
+          return res.end('invalid DID');
+        }
+        source = buildPdsBlobUrl(did, cid);
+      }
+      if (!isAllowedPdsBlob(source)) {
+        res.writeHead(400);
+        return res.end('invalid PDS blob');
+      }
+      const key = `pds:${source}`;
+      let r = cache.get(key);
+      if (!r) {
+        r = {
+          body: await limit(() => safeFetch(source, isAllowedPdsBlob).then(readResponse)),
+          type: 'application/octet-stream'
+        };
+        putCache(key, r);
+      }
+      res.writeHead(200, mediaHeaders(r.type, r.body.length));
+      return req.method === 'HEAD' ? res.end() : res.end(r.body);
     }
-    res.writeHead(404); res.end('not found');
-  } catch (error) { console.error(error); res.writeHead(502); res.end('media unavailable'); }
-});
-
+    res.writeHead(404);
+    return res.end('not found');
+  } catch (error) {
+    console.error(error);
+    res.writeHead(502);
+    return res.end('media unavailable');
+  }
+}
+const server = createServer(handle);
 if (process.env.NODE_ENV !== 'test') server.listen(Number(process.env.PORT || 8787), '0.0.0.0');
-export { server, ffmpeg, transcode, mosaic };
+export { server, transcode };

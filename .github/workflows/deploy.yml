@@ -48,20 +48,32 @@ jobs:
           main = "./dist/worker.js"
           compatibility_date = "${{ vars.CF_COMPATIBILITY_DATE }}"
           no_bundle = true
+          analytics_engine_datasets = [
+            { binding = "AnalyticsEngine" }
+          ]
 
           [assets]
           directory = "./assets"
           binding = "ASSETS"
-
-          analytics_engine_datasets = [
-            { binding = "AnalyticsEngine" }
-          ]
 
           [ai]
           binding = "AI"
 
           [build]
           command = "npm run build"
+
+          [[containers]]
+          class_name = "MediaTranscoder"
+          image = "./services/media-transcoder/Dockerfile"
+          max_instances = 4
+
+          [[durable_objects.bindings]]
+          class_name = "MediaTranscoder"
+          name = "MEDIA_TRANSCODER"
+
+          [[migrations]]
+          new_sqlite_classes = ["MediaTranscoder"]
+          tag = "media-transcoder-v1"
           EOF
 
       - name: Deploy with Wrangler
