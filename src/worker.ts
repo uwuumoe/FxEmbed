@@ -292,6 +292,10 @@ app.all('/error', async c => {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    const assetFetcher = (env as Env & { ASSETS?: Fetcher }).ASSETS;
+    if (assetFetcher && new URL(request.url).pathname === '/catgirlicon.png') {
+      return assetFetcher.fetch(request);
+    }
     try {
       return await app.fetch(request, env, ctx);
     } catch (err) {

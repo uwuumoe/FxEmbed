@@ -47,7 +47,8 @@ export const getBaseRedirectUrl = (c: Context) => {
 export const faviconRoute = async (c: Context) => {
   const branding = getBranding(c);
   try {
-    const response = await fetch(branding.favicon);
+    const faviconUrl = new URL(branding.favicon, c.req.url).toString();
+    const response = await fetch(faviconUrl);
     const body = await response.arrayBuffer();
     return c.body(body, response.status as ContentfulStatusCode, {
       'Content-Type': response.headers.get('Content-Type') || 'image/x-icon',

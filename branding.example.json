@@ -83,5 +83,22 @@
         "64": "https://fxembed-assets.pages.dev/logos/fxinstagram64.png"
       }
     }
+    ,{
+      "name": "catgirlx",
+      "domains": ["catgirlx.com"],
+      "provider": "twitter",
+      "favicon": "/catgirlicon.png",
+      "redirect": "https://github.com/uwuumoe/FxEmbed",
+      "color": "#ff8bd1",
+      "activityIcons": {
+        "default": "/catgirlicon.png",
+        "svg": "/catgirlicon.png",
+        "16": "/catgirlicon.png",
+        "24": "/catgirlicon.png",
+        "32": "/catgirlicon.png",
+        "48": "/catgirlicon.png",
+        "64": "/catgirlicon.png"
+      }
+    }
   ]
 }

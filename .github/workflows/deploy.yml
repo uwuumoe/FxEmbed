@@ -47,8 +47,12 @@ jobs:
           account_id = "${{ secrets.CF_ACCOUNT_ID }}"
           main = "./dist/worker.js"
           compatibility_date = "${{ vars.CF_COMPATIBILITY_DATE }}"
-          send_metrics = false
           no_bundle = true
+
+          [assets]
+          directory = "./assets"
+          binding = "ASSETS"
+
           analytics_engine_datasets = [
             { binding = "AnalyticsEngine" }
           ]
@@ -98,3 +102,10 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
           command: deploy --no-bundle
+
+      - name: Preserve credential binding
+        if: ${{ secrets.CREDENTIAL_KEY != '' }}
+        env:
+          CREDENTIAL_KEY: ${{ secrets.CREDENTIAL_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: printf '%s' "$CREDENTIAL_KEY" | npx wrangler secret put CREDENTIAL_KEY --name "${{ vars.CF_WORKER_NAME }}"
