@@ -89,7 +89,7 @@ import { atmosphere } from './realms/atmosphere/router';
 import { getBranding } from './helpers/branding';
 import { tiktok } from './realms/tiktok/router';
 import { instagram } from './realms/instagram/router';
-export { MediaTranscoder } from './media-container';
+export { MediaTranscoderV2 } from './media-container';
 
 const noCache = 'max-age=0, no-cache, no-store, must-revalidate';
 const embeddingClientRegex =
@@ -314,8 +314,8 @@ export default {
       /^(\/tweet_video\/[^/]+\.(?:webp|gif)|\/(?:jpeg|webp)\/|\/mosaic(?:$|\/)|\/video(?:$|\/)|\/pds-cache(?:$|\/)|\/did%3aplc%3a|\/did:plc:)/i.test(
         requestUrl.pathname
       );
-    const mediaBinding = (env as Env & { MEDIA_TRANSCODER?: DurableObjectNamespace })
-      .MEDIA_TRANSCODER;
+    const mediaBinding = (env as Env & { MEDIA_TRANSCODER_V2?: DurableObjectNamespace })
+      .MEDIA_TRANSCODER_V2;
     if (mediaHosts.has(requestUrl.hostname) && mediaPath && mediaBinding) {
       const id = mediaBinding.idFromName('global-media-transcoder');
       return mediaBinding.get(id).fetch(request);

@@ -49,16 +49,16 @@ jobs:
           [build]
           command = "npm run build"
           [[containers]]
-          class_name = "MediaTranscoder"
+          class_name = "MediaTranscoderV2"
           image = "./services/media-transcoder/Dockerfile"
           instance_type = "standard-2"
           max_instances = 4
           [[durable_objects.bindings]]
-          class_name = "MediaTranscoder"
-          name = "MEDIA_TRANSCODER"
+          class_name = "MediaTranscoderV2"
+          name = "MEDIA_TRANSCODER_V2"
           [[migrations]]
-          new_sqlite_classes = ["MediaTranscoder"]
-          tag = "media-transcoder-v1"
+          new_sqlite_classes = ["MediaTranscoderV2"]
+          tag = "media-transcoder-v2"
           EOF
       - name: Deploy with Wrangler
         # Publish the container image as part of the production deployment.
