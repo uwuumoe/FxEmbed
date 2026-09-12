@@ -15,10 +15,12 @@ const getDomain = (): string | null => {
 /** Preserve the original public translation contract when Polyglot is unset. */
 const translateWithMyMemory = async (
   status: APITwitterStatus | APIBlueskyStatus | APIMastodonStatus | APIStatus,
-  language: string
+  language: string,
+  contactEmail?: string
 ): Promise<PolyglotTranslation | null> => {
   if (!status.text?.trim() || !status.lang?.trim()) return null;
   const query = new URLSearchParams({ q: status.text, langpair: `${status.lang}|${language}` });
+  if (contactEmail?.trim()) query.set('de', contactEmail.trim());
   try {
     const response = await fetch(`https://api.mymemory.translated.net/get?${query}`);
     if (!response.ok) return null;
@@ -47,7 +49,7 @@ export const translateStatus = async (
   const domain = getDomain();
   if (!domain) {
     console.log('Using MyMemory translation');
-    return translateWithMyMemory(status, language);
+    return translateWithMyMemory(status, language, _c.env?.MYMEMORY_CONTACT_EMAIL);
   }
   try {
     const response = await fetch(`https://${domain}/translate`, {
@@ -64,7 +66,7 @@ export const translateStatus = async (
 
     if (!response.ok) {
       console.error('Polyglot translation failed', data);
-      return translateWithMyMemory(status, language);
+      return translateWithMyMemory(status, language, _c.env?.MYMEMORY_CONTACT_EMAIL);
     }
 
     // A provider can return HTTP 200 while echoing the source text. Treat that
@@ -72,7 +74,7 @@ export const translateStatus = async (
     const translatedText = data.translated_text?.trim();
     if (!translatedText || translatedText === status.text?.trim()) {
       console.warn('Polyglot returned source text; using MyMemory fallback');
-      return translateWithMyMemory(status, language);
+      return translateWithMyMemory(status, language, _c.env?.MYMEMORY_CONTACT_EMAIL);
     }
 
     console.log('Polyglot translation successful', data.translated_text);
