@@ -128,8 +128,13 @@ export function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buffer> {
     child.stdin.on('error', () => undefined);
     child.on('close', code => {
       clearTimeout(timer);
-      if (code === 0 && size <= MAX_OUTPUT) resolve(Buffer.concat(chunks));
-      else
+      if (code === 0 && size <= MAX_OUTPUT) {
+        const body = Buffer.concat(chunks);
+        // WebP's RIFF muxer cannot seek on pipe:1; repair its final size.
+        if (format === 'webp' && body.length >= 8 && body.toString('ascii', 0, 4) === 'RIFF')
+          body.writeUInt32LE(body.length - 8, 4);
+        resolve(body);
+      } else
         reject(
           new Error(error || (timedOut ? 'ffmpeg timed out' : size > MAX_OUTPUT ? 'output too large' : `ffmpeg exited ${code}`))
         );
