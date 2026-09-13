@@ -53,6 +53,33 @@ test('identical media GETs reach the container once; repeat served from Workers 
   expect(calls).toBe(1);
 });
 
+test('mosaic output is stored in Workers cache and avoids repeated container compute', async () => {
+  let calls = 0;
+  const env = mediaEnv(async () => {
+    calls++;
+    return new Response('mosaic-bytes', {
+      status: 200,
+      headers: {
+        'content-type': 'image/jpeg',
+        'cache-control': 'public, max-age=86400, immutable'
+      }
+    });
+  });
+  const { ctx, settle } = testCtx();
+  const url =
+    'https://mosaic.fxtwitter.com/jpeg/1234567890/source-image-one/source-image-two';
+
+  const first = await worker.fetch(new Request(url), env as never, ctx);
+  expect(first.status).toBe(200);
+  expect(await first.arrayBuffer()).toEqual(new TextEncoder().encode('mosaic-bytes').buffer);
+  await settle();
+
+  const second = await worker.fetch(new Request(url), env as never, ctx);
+  expect(second.status).toBe(200);
+  expect(await second.arrayBuffer()).toEqual(new TextEncoder().encode('mosaic-bytes').buffer);
+  expect(calls).toBe(1);
+});
+
 test('range requests bypass the Workers media cache and are never stored', async () => {
   let calls = 0;
   const env = mediaEnv(async (request: Request) => {
