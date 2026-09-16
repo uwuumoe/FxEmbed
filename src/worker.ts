@@ -322,20 +322,20 @@ export default {
     if (mediaHosts.has(requestUrl.hostname) && mediaPath && mediaBinding) {
       const id = mediaBinding.idFromName('global-media-transcoder');
       const stub = mediaBinding.get(id);
-      // Cacheable media bytes live in the Workers Cache API at the edge, never in
-      // the container: containers are compute only. Bypass on Range (a partial
-      // response must never populate the cache) and never store non-200s.
-      if (
-        request.method === 'GET' &&
-        !request.headers.has('range') &&
-        typeof caches !== 'undefined'
-      ) {
+      // Cache full media at the edge. Cache API can slice a cached response with
+      // Content-Length for Range requests; cold ranges pass through without storage.
+      if (request.method === 'GET' && typeof caches !== 'undefined') {
         const cache = caches.default;
-        const cached = await cache.match(request);
+        // Bump when encoder/mosaic behavior changes. Internal only: preserve the
+        // original URL sent to the container and Range headers used by match().
+        const cacheUrl = new URL(request.url);
+        cacheUrl.searchParams.set('__fx_media_version', '2');
+        const cacheKey = new Request(cacheUrl, request);
+        const cached = await cache.match(cacheKey);
         if (cached) return cached;
         const response = await stub.fetch(request);
-        if (response.status === 200) {
-          ctx.waitUntil(cache.put(request, response.clone()));
+        if (response.status === 200 && !request.headers.has('range')) {
+          ctx.waitUntil(cache.put(cacheKey, response.clone()));
         }
         return response;
       }
