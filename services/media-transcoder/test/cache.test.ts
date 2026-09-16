@@ -23,7 +23,8 @@ test('PDS blobs have a month at the edge and one day in browsers', async () => {
     200,
     expect.objectContaining({
       'cache-control': 'public, max-age=86400, s-maxage=2592000, immutable',
-      'content-length': '4'
+      'content-length': '4',
+      'x-media-content-length': '4'
     })
   );
   expect(end).toHaveBeenCalledWith(Buffer.from('blob'));
@@ -47,7 +48,8 @@ test('generic video proxy retains a one hour TTL', async () => {
     200,
     expect.objectContaining({
       'cache-control': 'public, max-age=3600',
-      'content-length': '5'
+      'content-length': '5',
+      'x-media-content-length': '5'
     })
   );
 });

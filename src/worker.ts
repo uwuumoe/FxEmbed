@@ -329,11 +329,28 @@ export default {
         // Bump when encoder/mosaic behavior changes. Internal only: preserve the
         // original URL sent to the container and Range headers used by match().
         const cacheUrl = new URL(request.url);
-        cacheUrl.searchParams.set('__fx_media_version', '2');
+        cacheUrl.searchParams.set('__fx_media_version', '3');
         const cacheKey = new Request(cacheUrl, request);
         const cached = await cache.match(cacheKey);
-        if (cached) return cached;
-        const response = await stub.fetch(request);
+        if (cached && (!request.headers.has('range') || cached.status === 206)) return cached;
+        let response = await stub.fetch(request);
+        // Container transport can strip Content-Length. Reconstitute a known-
+        // length stream without buffering media into Worker memory.
+        const length = response.headers.get('x-media-content-length');
+        if (
+          response.body &&
+          length &&
+          /^\d+$/.test(length) &&
+          Number.isSafeInteger(Number(length))
+        ) {
+          const stream = new FixedLengthStream(Number(length));
+          ctx.waitUntil(response.body.pipeTo(stream.writable));
+          const headers = new Headers(response.headers);
+          headers.delete('x-media-content-length');
+          headers.delete('transfer-encoding');
+          headers.set('content-length', length);
+          response = new Response(stream.readable, { status: response.status, headers });
+        }
         if (response.status === 200 && !request.headers.has('range')) {
           ctx.waitUntil(cache.put(cacheKey, response.clone()));
         }

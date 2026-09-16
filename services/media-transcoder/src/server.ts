@@ -263,7 +263,7 @@ function mediaHeaders(type: string, length?: number) {
   return {
     'content-type': type,
     'cache-control': 'public, max-age=86400, s-maxage=2592000, immutable',
-    ...(length === undefined ? {} : { 'content-length': String(length) })
+    ...(length === undefined ? {} : { 'content-length': String(length), 'x-media-content-length': String(length) })
   };
 }
 export async function handle(req: IncomingMessage, res: ServerResponse) {
@@ -318,6 +318,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
         const v = upstream.headers.get(h);
         if (v) out[h] = v;
       }
+      if (out['content-length']) out['x-media-content-length'] = out['content-length'];
       out['cache-control'] = 'public, max-age=3600';
       res.writeHead(upstream.status, out);
       if (req.method === 'HEAD') return res.end();
@@ -354,6 +355,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse) {
             responseHeaders['content-range'] = `bytes ${start}-${boundedEnd}/${body.length}`;
             responseHeaders['accept-ranges'] = 'bytes';
             responseHeaders['content-length'] = String(ranged.length);
+            responseHeaders['x-media-content-length'] = String(ranged.length);
             status = 206;
             res.writeHead(status, responseHeaders);
             return req.method === 'HEAD' ? res.end() : res.end(ranged);

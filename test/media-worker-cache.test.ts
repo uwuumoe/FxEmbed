@@ -82,14 +82,16 @@ test('mosaic output is stored in Workers cache and avoids repeated container com
 test('warm range requests are served as partial bytes without container work', async () => {
   const handler = vi.fn(
     async () =>
-      new Response('0123456789', {
-        headers: { 'content-length': '10', 'cache-control': 'public, max-age=3600' }
+      new Response(new Blob(['0123456789']).stream(), {
+        headers: { 'x-media-content-length': '10', 'cache-control': 'public, max-age=3600' }
       })
   );
   const env = mediaEnv(handler);
   const { ctx, settle } = testCtx();
   const url = 'https://video.fxtwitter.com/video?url=https%3A%2F%2Fvideo.twimg.com%2Fwarm.mp4';
-  await worker.fetch(new Request(url), env as never, ctx);
+  const full = await worker.fetch(new Request(url), env as never, ctx);
+  expect(full.headers.get('content-length')).toBe('10');
+  expect(full.headers.has('x-media-content-length')).toBe(false);
   await settle();
   const response = await worker.fetch(
     new Request(url, {
