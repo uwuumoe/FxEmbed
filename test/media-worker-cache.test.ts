@@ -66,8 +66,7 @@ test('mosaic output is stored in Workers cache and avoids repeated container com
     });
   });
   const { ctx, settle } = testCtx();
-  const url =
-    'https://mosaic.fxtwitter.com/jpeg/1234567890/source-image-one/source-image-two';
+  const url = 'https://mosaic.fxtwitter.com/jpeg/1234567890/source-image-one/source-image-two';
 
   const first = await worker.fetch(new Request(url), env as never, ctx);
   expect(first.status).toBe(200);
@@ -80,7 +79,32 @@ test('mosaic output is stored in Workers cache and avoids repeated container com
   expect(calls).toBe(1);
 });
 
-test('range requests bypass the Workers media cache and are never stored', async () => {
+test('warm range requests are served as partial bytes without container work', async () => {
+  const handler = vi.fn(
+    async () =>
+      new Response('0123456789', {
+        headers: { 'content-length': '10', 'cache-control': 'public, max-age=3600' }
+      })
+  );
+  const env = mediaEnv(handler);
+  const { ctx, settle } = testCtx();
+  const url = 'https://video.fxtwitter.com/video?url=https%3A%2F%2Fvideo.twimg.com%2Fwarm.mp4';
+  await worker.fetch(new Request(url), env as never, ctx);
+  await settle();
+  const response = await worker.fetch(
+    new Request(url, {
+      headers: { Range: 'bytes=2-5' }
+    }),
+    env as never,
+    ctx
+  );
+  expect(response.status).toBe(206);
+  expect(response.headers.get('content-range')).toBe('bytes 2-5/10');
+  expect(await response.text()).toBe('2345');
+  expect(handler).toHaveBeenCalledTimes(1);
+});
+
+test('cold range requests pass through and are never stored', async () => {
   let calls = 0;
   const env = mediaEnv(async (request: Request) => {
     calls++;
@@ -99,7 +123,11 @@ test('range requests bypass the Workers media cache and are never stored', async
   const { ctx, settle } = testCtx();
   const url = 'https://video.fxtwitter.com/video?url=https%3A%2F%2Fvideo.twimg.com%2Ftest.mp4';
 
-  const ranged = await worker.fetch(new Request(url, { headers: { Range: 'bytes=0-3' } }), env as never, ctx);
+  const ranged = await worker.fetch(
+    new Request(url, { headers: { Range: 'bytes=0-3' } }),
+    env as never,
+    ctx
+  );
   expect(ranged.status).toBe(206);
   await settle();
 
@@ -108,6 +136,22 @@ test('range requests bypass the Workers media cache and are never stored', async
   await worker.fetch(new Request(url), env as never, ctx);
   // 1 ranged passthrough + 1 plain miss; the repeat must not touch the container.
   expect(calls).toBe(2);
+});
+
+test('media cache namespace ignores outputs from an older deployment policy', async () => {
+  const url = 'https://gif.fxtwitter.com/tweet_video/versiontest.webp';
+  await caches.default.put(
+    new Request(url),
+    new Response('old-output', {
+      headers: { 'cache-control': 'public, max-age=86400' }
+    })
+  );
+  const handler = vi.fn(async () => okImage());
+  const { ctx, settle } = testCtx();
+  const response = await worker.fetch(new Request(url), mediaEnv(handler) as never, ctx);
+  expect(await response.arrayBuffer()).toEqual(new TextEncoder().encode('fake-bytes').buffer);
+  await settle();
+  expect(handler).toHaveBeenCalledTimes(1);
 });
 
 test('container errors are never served from or written to the Workers media cache', async () => {

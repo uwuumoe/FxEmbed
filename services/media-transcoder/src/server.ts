@@ -262,7 +262,7 @@ async function resolvePdsBlob(did: string, cid: string): Promise<string> {
 function mediaHeaders(type: string, length?: number) {
   return {
     'content-type': type,
-    'cache-control': 'public, max-age=86400, immutable',
+    'cache-control': 'public, max-age=86400, s-maxage=2592000, immutable',
     ...(length === undefined ? {} : { 'content-length': String(length) })
   };
 }
