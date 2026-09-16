@@ -40,12 +40,13 @@ test.each(['webp', 'gif'] as const)(
       const decoded = JSON.parse(
         execFileSync('python3', [
           '-c',
-          'from PIL import Image; import sys,json; im=Image.open(sys.argv[1]); print(json.dumps({"size":im.size,"frames":im.n_frames,"duration":im.info.get("duration")}))',
+          'from PIL import Image; import sys,json; im=Image.open(sys.argv[1]); print(json.dumps({"size":im.size,"frames":im.n_frames,"duration":im.info.get("duration"),"loop":im.info.get("loop")}))',
           file
         ]).toString()
       );
       expect(decoded.size).toEqual([64, 48]);
       expect(decoded.frames).toBe(20);
+      expect(decoded.loop).toBe(0);
       const calls = vi.mocked(spawn).mock.calls;
       if (format === 'gif') {
         expect(calls.map(c => c[0])).toEqual(['ffmpeg', 'gifski']);
@@ -66,6 +67,8 @@ test.each(['webp', 'gif'] as const)(
           'pipe:0',
           '-c:v',
           'libwebp_anim',
+          '-loop',
+          '0',
           '-f',
           'webp',
           expect.any(String)

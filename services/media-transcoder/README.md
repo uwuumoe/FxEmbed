@@ -14,13 +14,14 @@ All URL fetches require HTTPS and a public, provider allowlist host. Inputs,
 outputs, mosaic count, and cache entries are bounded; failures are never cached.
 GIF conversion streams FFmpeg's Y4M output to gifski 1.34.0. Animated WebP uses
 FFmpeg's `libwebp_anim`. Both use encoder defaults: no FPS, scale, duration,
-quality, or loop overrides. gifski may resize large inputs under its own defaults.
+or quality overrides. WebP explicitly uses `-loop 0` for infinite looping; GIF
+loops indefinitely by default. gifski may resize large inputs under its own defaults.
 The only GIF decoder pixel-format flag selects `yuv444p`, required for Y4M to
 accept RGB/paletted inputs without chroma subsampling. Commands are equivalent to:
 
 ```sh
 ffmpeg -i input.mp4 -pix_fmt yuv444p -f yuv4mpegpipe - | gifski -o - -
-ffmpeg -i input.mp4 -c:v libwebp_anim -f webp output.webp
+ffmpeg -i input.mp4 -c:v libwebp_anim -loop 0 -f webp output.webp
 ```
 
 The 32 MiB input / 64 MiB output limits, 45-second processing timeout, and

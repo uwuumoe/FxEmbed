@@ -110,14 +110,14 @@ export async function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buf
   };
   const timer = setTimeout(() => stop(new Error('transcode timed out')), FFMPEG_TIMEOUT);
   try {
-    // No FPS, dimensions, duration, quality or looping overrides. Y4M carries
+    // No FPS, dimensions, duration or quality overrides. WebP loops forever. Y4M carries
     // decoded frames and timing to gifski, whose own defaults apply.
     // yuv444p makes RGB/paletted inputs Y4M-compatible without chroma subsampling.
     const decoder = start(
       'ffmpeg',
       format === 'gif'
         ? ['-i', 'pipe:0', '-pix_fmt', 'yuv444p', '-f', 'yuv4mpegpipe', 'pipe:1']
-        : ['-i', 'pipe:0', '-c:v', 'libwebp_anim', '-f', 'webp', outputPath]
+        : ['-i', 'pipe:0', '-c:v', 'libwebp_anim', '-loop', '0', '-f', 'webp', outputPath]
     );
     const chunks: Buffer[] = [];
     let size = 0;
