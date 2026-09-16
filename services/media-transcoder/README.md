@@ -12,11 +12,30 @@ This container provides the media URLs configured by `GIF_TRANSCODE_DOMAIN_LIST`
 
 All URL fetches require HTTPS and a public, provider allowlist host. Inputs,
 outputs, mosaic count, and cache entries are bounded; failures are never cached.
-The image/video work is performed by FFmpeg (`libwebp_anim` for animated WebP).
-
-Local verification:
+GIF conversion streams FFmpeg's Y4M output to gifski 1.34.0. Animated WebP uses
+FFmpeg's `libwebp_anim`. Both use encoder defaults: no FPS, scale, duration,
+quality, or loop overrides. gifski may resize large inputs under its own defaults.
+The only GIF decoder pixel-format flag selects `yuv444p`, required for Y4M to
+accept RGB/paletted inputs without chroma subsampling. Commands are equivalent to:
 
 ```sh
+ffmpeg -i input.mp4 -pix_fmt yuv444p -f yuv4mpegpipe - | gifski -o - -
+ffmpeg -i input.mp4 -c:v libwebp_anim -f webp output.webp
+```
+
+The 32 MiB input / 64 MiB output limits, 45-second processing timeout, and
+single-job concurrency remain. GIF output is bounded while streaming; WebP size
+is checked after encoding (as before). Errors/timeouts stop both GIF processes.
+The Dockerfile builds gifski from its pinned crate with locked dependencies for
+the target architecture; its Rust build tools are not included in the final image.
+
+gifski is AGPL-3.0-or-later; source and license are available at
+https://github.com/ImageOptim/gifski/tree/1.34.0. It runs as a separate CLI process.
+
+Local verification requires FFmpeg, gifski 1.34.0, Node, and Python with Pillow:
+
+```sh
+NODE_ENV=test npm test
 NODE_ENV=test npx tsx integration-test.ts
 npx tsc -p tsconfig.json --noEmit
 ```

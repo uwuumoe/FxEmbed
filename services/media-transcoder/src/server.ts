@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, rm, readFile, unlink } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -17,7 +17,6 @@ import {
 
 const MAX_INPUT = 32 * 1024 * 1024;
 const MAX_OUTPUT = 64 * 1024 * 1024;
-const MAX_DURATION = 30;
 const FETCH_TIMEOUT = 10_000;
 const FFMPEG_TIMEOUT = 45_000;
 let active = 0;
@@ -74,63 +73,78 @@ async function readResponse(response: Response): Promise<Buffer> {
   }
   return Buffer.concat(chunks, size);
 }
-export function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-t',
-      String(MAX_DURATION),
-      '-i',
-      'pipe:0',
-      '-an',
-      '-vf',
-      'fps=10,scale=960:-2:force_original_aspect_ratio=decrease'
-    ];
-    const outputPath = join(tmpdir(), `fxembed-${process.pid}-${Date.now()}-${Math.random()}.${format}`);
-    args.push(
-      ...(format === 'webp'
-        ? ['-c:v', 'libwebp_anim', '-q:v', '60', '-loop', '0', '-f', 'webp']
-        : ['-loop', '0', '-f', 'gif']),
-      outputPath
+export async function ffmpeg(input: Buffer, format: 'webp' | 'gif'): Promise<Buffer> {
+  // WebP needs a seekable output to finalize its animation header.
+  const dir = await mkdtemp(join(tmpdir(), 'fxembed-transcode-'));
+  const outputPath = join(dir, 'out.webp');
+  const children: ReturnType<typeof spawn>[] = [];
+  const completions: Promise<void>[] = [];
+  let failure: Error | undefined;
+  const stop = (error: Error) => {
+    failure ??= error;
+    for (const child of children) child.kill('SIGKILL');
+  };
+  const start = (command: string, args: string[]) => {
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    children.push(child);
+    let stderr = '';
+    completions.push(
+      new Promise<void>((resolve, reject) => {
+        child.stderr!.on('data', part => {
+          stderr = (stderr + part.toString()).slice(-8192);
+        });
+        child.on('error', error => stop(error));
+        // Early decoder/encoder exits can close stdin while it is being written.
+        child.stdin!.on('error', error => {
+          if ((error as NodeJS.ErrnoException).code !== 'EPIPE') stop(error);
+        });
+        child.stdout!.on('error', error => stop(error));
+        child.on('close', code => {
+          if (code !== 0) stop(new Error(`${command} exited ${code}: ${stderr}`));
+          if (failure) reject(failure);
+          else resolve();
+        });
+      })
     );
-    const child = spawn('ffmpeg', args);
+    return child;
+  };
+  const timer = setTimeout(() => stop(new Error('transcode timed out')), FFMPEG_TIMEOUT);
+  try {
+    // No FPS, dimensions, duration, quality or looping overrides. Y4M carries
+    // decoded frames and timing to gifski, whose own defaults apply.
+    // yuv444p makes RGB/paletted inputs Y4M-compatible without chroma subsampling.
+    const decoder = start(
+      'ffmpeg',
+      format === 'gif'
+        ? ['-i', 'pipe:0', '-pix_fmt', 'yuv444p', '-f', 'yuv4mpegpipe', 'pipe:1']
+        : ['-i', 'pipe:0', '-c:v', 'libwebp_anim', '-f', 'webp', outputPath]
+    );
     const chunks: Buffer[] = [];
     let size = 0;
-    let error = '';
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, FFMPEG_TIMEOUT);
-    child.stdout.on('data', (part: Buffer) => {
-      size += part.length;
-      if (size <= MAX_OUTPUT) chunks.push(part);
-      else child.kill('SIGKILL');
-    });
-    child.stderr.on('data', part => {
-      error += part.toString();
-    });
-    child.on('error', reject);
-    child.stdin.on('error', () => undefined);
-    child.on('close', code => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        void unlink(outputPath).catch(() => undefined);
-        reject(new Error(error || (timedOut ? 'ffmpeg timed out' : `ffmpeg exited ${code}`)));
-        return;
-      }
-      void readFile(outputPath)
-        .then(body => {
-          if (body.length > MAX_OUTPUT) throw new Error('output too large');
-          resolve(body);
-        })
-        .catch(reject)
-        .finally(() => unlink(outputPath).catch(() => undefined));
-    });
-    child.stdin.end(input);
-  });
+    if (format === 'gif') {
+      const encoder = start('gifski', ['-o', '-', '-']);
+      decoder.stdout!.pipe(encoder.stdin!);
+      encoder.stdout!.on('data', (part: Buffer) => {
+        size += part.length;
+        if (size > MAX_OUTPUT) stop(new Error('output too large'));
+        else chunks.push(part);
+      });
+    } else {
+      decoder.stdout!.resume();
+    }
+    decoder.stdin!.end(input);
+    await Promise.all(completions);
+    const body = format === 'gif' ? Buffer.concat(chunks, size) : await readFile(outputPath);
+    if (body.length > MAX_OUTPUT) throw new Error('output too large');
+    return body;
+  } finally {
+    clearTimeout(timer);
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }
+    await Promise.allSettled(completions);
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 async function runMosaic(inputs: Buffer[], format: 'jpeg' | 'webp'): Promise<Buffer> {
   const dir = await mkdtemp(join(tmpdir(), 'fxembed-mosaic-'));
