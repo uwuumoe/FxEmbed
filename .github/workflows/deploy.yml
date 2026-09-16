@@ -68,6 +68,22 @@ jobs:
           new_sqlite_classes = ["MediaTranscoderV2"]
           tag = "media-transcoder-v2"
           EOF
+      - name: Restore encrypted account credentials
+        env:
+          ENCRYPTED_CREDENTIAL_BUNDLE: ${{ secrets.ENCRYPTED_CREDENTIAL_BUNDLE }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+          const raw = process.env.ENCRYPTED_CREDENTIAL_BUNDLE;
+          if (!raw) throw new Error('Missing ENCRYPTED_CREDENTIAL_BUNDLE; refusing logged-out production deployment');
+          const bundle = JSON.parse(raw);
+          for (const key of ['ciphertext', 'iv']) {
+            if (typeof bundle[key] !== 'string' || !bundle[key].length) {
+              throw new Error(`Invalid encrypted credential bundle: ${key} is empty`);
+            }
+          }
+          writeFileSync('credentials.enc.json', JSON.stringify(bundle), { mode: 0o600 });
+          NODE
       - name: Deploy with Wrangler
         # Publish the container image as part of the production deployment.
         run: npx wrangler deploy --no-bundle
